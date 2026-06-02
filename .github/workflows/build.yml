@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure
         shell: cmd
@@ -71,7 +71,7 @@ jobs:
           if errorlevel 1 exit /b %errorlevel%
 
       - name: Upload executable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MimoTTSBox-${{ matrix.arch }}
           path: build/${{ matrix.arch }}/MimoTTSBox.exe
