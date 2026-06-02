@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: windows-2025-vs2026
+    env:
+      VS_PATH: 'C:\Program Files\Microsoft Visual Studio\18\Enterprise'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            vs_arch: x64
+          - arch: x86
+            vs_arch: x86
+          - arch: arm64
+            vs_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        shell: cmd
+        run: |
+          if not exist "%VS_PATH%\Common7\Tools\VsDevCmd.bat" (
+            echo VsDevCmd.bat not found at "%VS_PATH%\Common7\Tools\VsDevCmd.bat"
+            exit /b 1
+          )
+
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -host_arch=amd64 -arch=${{ matrix.vs_arch }}
+          if errorlevel 1 exit /b %errorlevel%
+
+          for %%I in (cl.exe) do set "CL_PATH=%%~$PATH:I"
+          echo Using compiler: %CL_PATH%
+          echo %CL_PATH% | findstr /I "\\${{ matrix.vs_arch }}\\cl.exe" >NUL
+          if errorlevel 1 (
+            echo Expected ${{ matrix.vs_arch }} compiler, but got %CL_PATH%
+            exit /b 1
+          )
+
+          cmake -S . -B "build\${{ matrix.arch }}" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -host_arch=amd64 -arch=${{ matrix.vs_arch }}
+          if errorlevel 1 exit /b %errorlevel%
+
+          for %%I in (cl.exe) do set "CL_PATH=%%~$PATH:I"
+          echo Using compiler: %CL_PATH%
+          echo %CL_PATH% | findstr /I "\\${{ matrix.vs_arch }}\\cl.exe" >NUL
+          if errorlevel 1 (
+            echo Expected ${{ matrix.vs_arch }} compiler, but got %CL_PATH%
+            exit /b 1
+          )
+
+          cmake --build "build\${{ matrix.arch }}" --config Release
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: MimoTTSBox-${{ matrix.arch }}
+          path: build/${{ matrix.arch }}/MimoTTSBox.exe
+          if-no-files-found: error
