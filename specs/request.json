@@ -1,0 +1,26 @@
+// 请求授权走请求头 - Authorization: Bearer {ApiKey}
+{
+    "model": "mimo-v2.5-tts",
+    "messages": [
+        {
+            "role": "user", // 风格控制
+            "content": "用慵懒又带点宠溺的语气，像午后刚睡醒的猫一样，慢悠悠地跟恋人撒娇。"
+        },
+        {
+            "role": "assistant", // 音频合成文本（带标签）
+            "content": "[四川话]（委屈）哎……你怎么才回来呀……我等你等到都困了……下次早点嘛，好不好？"
+        }
+    ],
+    "audio": {
+        // 可选格式：wav, mp3, pcm16, pcm，其中pcm=pcm16
+        "format": "wav",
+        // 可选voice列表：[mimo_default, 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean]
+		// 默认：mimo_default -> 中国默认为冰糖，其它默认为Mia
+		// 中文：冰糖（女）, 茉莉（女）, 苏打（男）, 白桦（男）
+		// 英文：Mia（女）, Chloe（女）, Milo（男）, Dean（男）
+        "voice": "冰糖",
+        // 是否开启目标音频播报文本智能优化能力。
+        // 设置为 true 时，会对传入的目标文本做智能润色；若未传入目标文本，则自动生成适配播报场景的目标文本，再将处理完成的最终文本送入模型进行合成。
+        "optimize_text_preview": true
+    }
+}

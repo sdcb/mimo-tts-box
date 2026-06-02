@@ -1,0 +1,11 @@
+#pragma once
+
+#define IDI_APPICON 101
+
+#define IDD_ABOUT 201
+#define IDC_ABOUT_GITHUB_LINK 2001
+#define IDC_ABOUT_CJSON_LINK 2002
+
+#define IDM_FILE_CONFIG 40001
+#define IDM_FILE_EXIT 40002
+#define IDM_HELP_ABOUT 40003

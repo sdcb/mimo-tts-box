@@ -1,0 +1,36 @@
+
+{
+  "id": "67d62cb57314437aaaf407a9ec7673a6",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "",
+        "role": "assistant",
+        "audio": {
+          "id": "7f7d4b103c014618b07a64dbee2ed813",
+          "data": "UklGRiT0CwBXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQD0CwBUAkUCpQEPAacAWQAHAKn/Uv/k/....",
+          "expires_at": null,
+          "transcript": null
+        },
+        "tool_calls": null,
+        "final_text_preview": "Hey boss — guess what, guess what? I just got the results back and I actually passed! Not just passed, I got a distinction! I know, I know — you told me I was cutting it close, but hey, here we are. Drinks are on me tonight, okay?"
+      }
+    }
+  ],
+  "created": 1780225353,
+  "model": "mimo-v2.5-tts",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 104,
+    "prompt_tokens": 259,
+    "total_tokens": 363,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "cached_tokens": 155
+    }
+  }
+}
