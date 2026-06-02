@@ -34,6 +34,4 @@ build-release\MimoTTSBox.exe
 
 ## 截图
 
-截图待补充。
-
-![主界面截图占位](docs/images/screenshot-main.png)
+<img src="https://github.com/user-attachments/assets/cc248c51-de16-4b1d-84de-f530790a6ddc" />
