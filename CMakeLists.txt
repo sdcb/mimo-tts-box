@@ -14,6 +14,13 @@ endif()
 add_executable(MimoTTSBox WIN32
   src/main.c
   src/ui_main.c
+  src/ui_controls.c
+  src/ui_dialogs.c
+  src/ui_history_list.c
+  src/ui_layout.c
+  src/ui_metrics.c
+  src/ui_request_flow.c
+  src/ui_response_view.c
   src/config.c
   src/request_builder.c
   src/http_client.c
