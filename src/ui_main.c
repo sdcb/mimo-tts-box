@@ -55,6 +55,7 @@ typedef struct MainState {
     HWND voice_combo;
     HWND format_combo;
     HWND optimize_check;
+    HWND auto_play_check;
     HWND status_static;
     HWND preview_edit;
     HWND play_button;
@@ -86,6 +87,7 @@ static LRESULT CALLBACK main_child_subclass_proc(HWND hwnd, UINT msg, WPARAM wpa
                                                  UINT_PTR subclass_id, DWORD_PTR ref_data);
 static void update_multiline_scrollbar(HWND edit);
 static void refresh_multiline_scrollbars(MainState *s);
+static void on_play(MainState *s);
 
 static MainState *state_from_hwnd(HWND hwnd) {
     return (MainState *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
@@ -332,6 +334,7 @@ static void populate_request_controls(MainState *s) {
     combo_select_text(s->voice_combo, s->config->request.voice);
     combo_select_text(s->format_combo, s->config->request.output_format);
     SendMessageW(s->optimize_check, BM_SETCHECK, s->config->request.optimize_text_preview ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(s->auto_play_check, BM_SETCHECK, s->config->request.auto_play_on_download ? BST_CHECKED : BST_UNCHECKED, 0);
     EnableWindow(s->stop_button, FALSE);
     refresh_multiline_scrollbars(s);
 }
@@ -363,6 +366,7 @@ static void update_config_from_controls(MainState *s) {
         s->config->request.output_format = format;
     }
     s->config->request.optimize_text_preview = SendMessageW(s->optimize_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    s->config->request.auto_play_on_download = SendMessageW(s->auto_play_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
 static int list_insert_record(HWND list, const wchar_t *time, const wchar_t *elapsed, const wchar_t *status, const wchar_t *text, const wchar_t *dir_name) {
@@ -707,6 +711,7 @@ static void CALLBACK request_threadpool_proc(PTP_CALLBACK_INSTANCE instance, PVO
     result->url = wcs_dup_or_empty(task->url);
     result->audio_text = wcs_dup_or_empty(task->audio_text);
     result->output_format = wcs_dup_or_empty(task->output_format);
+    result->auto_play_on_download = task->auto_play_on_download;
     result->request_json = str_dup_or_empty(task->request_json);
 
     HttpResponse http;
@@ -798,6 +803,13 @@ static void on_send(MainState *s) {
         MessageBoxW(s->hwnd, L"URL 不能为空。", APP_TITLE, MB_ICONWARNING);
         return;
     }
+    wchar_t *save_error = NULL;
+    config_save(s->config, &save_error);
+    if (save_error) {
+        MessageBoxW(s->hwnd, save_error, APP_TITLE, MB_ICONWARNING);
+        free(save_error);
+        save_error = NULL;
+    }
     if (!config_has_api_key(s->config)) {
         if (!show_config_dialog(s->hwnd, s->config) || !config_has_api_key(s->config)) {
             MessageBoxW(s->hwnd, L"发送请求前必须配置 API Key。", APP_TITLE, MB_ICONWARNING);
@@ -805,7 +817,6 @@ static void on_send(MainState *s) {
         }
         set_control_text(s->url_edit, s->config->url);
     }
-    wchar_t *save_error = NULL;
     config_save(s->config, &save_error);
     if (save_error) {
         MessageBoxW(s->hwnd, save_error, APP_TITLE, MB_ICONWARNING);
@@ -844,6 +855,7 @@ static void on_send(MainState *s) {
     task->voice = wcs_dup_or_empty(s->config->request.voice);
     task->output_format = wcs_dup_or_empty(s->config->request.output_format);
     task->optimize_text_preview = s->config->request.optimize_text_preview;
+    task->auto_play_on_download = s->config->request.auto_play_on_download;
     task->request_json = json;
     history_save_pending(task);
     if (!TrySubmitThreadpoolCallback(request_threadpool_proc, task, NULL)) {
@@ -871,6 +883,9 @@ static void on_request_done(MainState *s, RequestResult *result) {
     if (result->request_id == s->latest_request_id) {
         set_active_from_result(s, result);
         refresh_response_view(s, result->success);
+        if (result->success && result->auto_play_on_download && s->active.audio.data && s->active.audio.size > 0) {
+            on_play(s);
+        }
     }
     free_request_result(result);
 }
@@ -974,7 +989,8 @@ static void layout_controls(MainState *s) {
     int controls_y = main_top + req_h - bottom_controls_h + scale_for_dpi(5, s->dpi);
     MoveWindow(s->voice_combo, right_x, controls_y, scale_for_dpi(120, s->dpi), scale_for_dpi(400, s->dpi), TRUE);
     MoveWindow(s->format_combo, right_x + scale_for_dpi(130, s->dpi), controls_y, scale_for_dpi(90, s->dpi), scale_for_dpi(400, s->dpi), TRUE);
-    MoveWindow(s->optimize_check, right_x + scale_for_dpi(230, s->dpi), controls_y, scale_for_dpi(190, s->dpi), scale_for_dpi(24, s->dpi), TRUE);
+    MoveWindow(s->optimize_check, right_x + scale_for_dpi(230, s->dpi), controls_y, scale_for_dpi(170, s->dpi), scale_for_dpi(24, s->dpi), TRUE);
+    MoveWindow(s->auto_play_check, right_x + scale_for_dpi(405, s->dpi), controls_y, scale_for_dpi(115, s->dpi), scale_for_dpi(24, s->dpi), TRUE);
 
     int resp_button_h = scale_for_dpi(28, s->dpi);
     int resp_gap = scale_for_dpi(6, s->dpi);
@@ -1092,6 +1108,7 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
     s->voice_combo = make_child(s, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 0, IDC_VOICE_COMBO);
     s->format_combo = make_child(s, L"COMBOBOX", L"", CBS_DROPDOWNLIST, 0, IDC_FORMAT_COMBO);
     s->optimize_check = make_child(s, L"BUTTON", L"optimize_text_preview", BS_AUTOCHECKBOX, 0, IDC_OPTIMIZE_CHECK);
+    s->auto_play_check = make_child(s, L"BUTTON", L"下载后播放", BS_AUTOCHECKBOX, 0, IDC_AUTO_PLAY_CHECK);
     s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    响应大小: --", 0, 0, IDC_STATUS_STATIC);
     s->preview_edit = make_child(s, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, WS_EX_CLIENTEDGE, IDC_PREVIEW_EDIT);
     s->play_button = make_child(s, L"BUTTON", L"\x25b6\xfe0f 播放", BS_PUSHBUTTON, 0, IDC_PLAY_BUTTON);
@@ -1153,7 +1170,7 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case WM_CTLCOLORBTN: {
         HWND child = (HWND)lparam;
         if (s && (child == s->style_label || child == s->text_label ||
-                  child == s->status_static || child == s->optimize_check)) {
+                  child == s->status_static || child == s->optimize_check || child == s->auto_play_check)) {
             return paint_label_on_window_background(wparam);
         }
         break;

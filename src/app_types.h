@@ -31,6 +31,7 @@
 #define IDC_PLAY_BUTTON 1011
 #define IDC_STOP_BUTTON 1012
 #define IDC_SAVE_BUTTON 1013
+#define IDC_AUTO_PLAY_CHECK 1014
 
 typedef struct RequestSettings {
     wchar_t *style_control;
@@ -38,6 +39,7 @@ typedef struct RequestSettings {
     wchar_t *voice;
     wchar_t *output_format;
     BOOL optimize_text_preview;
+    BOOL auto_play_on_download;
 } RequestSettings;
 
 typedef struct AppConfig {
@@ -90,6 +92,7 @@ typedef struct RequestTask {
     wchar_t *voice;
     wchar_t *output_format;
     BOOL optimize_text_preview;
+    BOOL auto_play_on_download;
     char *request_json;
 } RequestTask;
 
@@ -110,6 +113,7 @@ typedef struct RequestResult {
     DWORD audio_size;
     DWORD status_code;
     DWORD elapsed_ms;
+    BOOL auto_play_on_download;
     BOOL json_ok;
     BOOL success;
 } RequestResult;

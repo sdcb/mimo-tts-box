@@ -26,6 +26,7 @@ void config_set_defaults(AppConfig *config) {
     config->request.voice = wcs_dup_or_empty(L"mimo_default");
     config->request.output_format = wcs_dup_or_empty(L"wav");
     config->request.optimize_text_preview = TRUE;
+    config->request.auto_play_on_download = FALSE;
 }
 
 BOOL config_has_api_key(const AppConfig *config) {
@@ -149,6 +150,7 @@ BOOL config_load(AppConfig *config, wchar_t **error_text) {
         replace_wstring(&config->request.voice, json_get_string_value(request, "Voice"));
         replace_wstring(&config->request.output_format, json_get_string_value(request, "OutputFormat"));
         config->request.optimize_text_preview = json_get_bool_value(request, "OptimizeTextPreview", TRUE);
+        config->request.auto_play_on_download = json_get_bool_value(request, "AutoPlayOnDownload", FALSE);
     }
     cJSON_Delete(root);
     free(text);
@@ -176,6 +178,7 @@ BOOL config_save(const AppConfig *config, wchar_t **error_text) {
     json_add_wstring(request, "Voice", config->request.voice);
     json_add_wstring(request, "OutputFormat", config->request.output_format);
     cJSON_AddBoolToObject(request, "OptimizeTextPreview", config->request.optimize_text_preview);
+    cJSON_AddBoolToObject(request, "AutoPlayOnDownload", config->request.auto_play_on_download);
     char *json = cJSON_Print(root);
     wchar_t *path = settings_path();
     BOOL ok = json && path && write_file_utf8(path, json);
