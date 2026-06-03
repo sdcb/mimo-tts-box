@@ -230,8 +230,7 @@ void free_active_response(ActiveResponse *response) {
     free(response->response_time);
     free(response->preview_text);
     free(response->raw_response);
-    free(response->output_format);
-    free(response->audio.data);
+    free(response->audio.pcm_data);
     memset(response, 0, sizeof(*response));
 }
 
@@ -280,6 +279,6 @@ void free_request_result(RequestResult *result) {
     free(result->response_text);
     free(result->error_text);
     free(result->final_text_preview);
-    free(result->audio_data);
+    free(result->pcm_data);
     free(result);
 }

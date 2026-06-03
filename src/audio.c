@@ -11,6 +11,7 @@
 #include <shlwapi.h>
 #include <wincrypt.h>
 #include <xaudio2.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -139,11 +140,30 @@ static BOOL decode_base64(const char *base64, BYTE **data, DWORD *size) {
     return TRUE;
 }
 
-BOOL audio_parse_response(const char *response_text, BYTE **audio_data, DWORD *audio_size,
-                          wchar_t **final_preview, wchar_t **error_text) {
-    *audio_data = NULL;
-    *audio_size = 0;
-    *final_preview = NULL;
+static int audio_duration_ms_from_pcm_size(DWORD pcm_size) {
+    ULONGLONG duration = ((ULONGLONG)pcm_size * 1000ULL) / PCM_AVG_BYTES_PER_SEC;
+    return duration > (ULONGLONG)INT_MAX ? INT_MAX : (int)duration;
+}
+
+void audio_free_parsed_response(ParsedAudioResponse *parsed) {
+    if (!parsed) {
+        return;
+    }
+    free(parsed->pcm_data);
+    free(parsed->final_text_preview);
+    memset(parsed, 0, sizeof(*parsed));
+}
+
+static BOOL decode_audio_to_pcm(const BYTE *data, DWORD size, const wchar_t *format,
+                                BYTE **pcm, DWORD *pcm_size, wchar_t **error_text);
+
+BOOL audio_parse_response(const char *response_text, const wchar_t *input_format,
+                          ParsedAudioResponse *parsed, wchar_t **error_text) {
+    memset(parsed, 0, sizeof(*parsed));
+    parsed->audio_duration_ms = -1;
+    parsed->prompt_tokens = -1;
+    parsed->completion_tokens = -1;
+    parsed->total_tokens = -1;
     if (error_text) {
         *error_text = NULL;
     }
@@ -158,21 +178,33 @@ BOOL audio_parse_response(const char *response_text, BYTE **audio_data, DWORD *a
     const cJSON *first = cJSON_IsArray(choices) ? cJSON_GetArrayItem(choices, 0) : NULL;
     const cJSON *message = first ? json_get_object(first, "message") : NULL;
     const cJSON *audio = message ? json_get_object(message, "audio") : NULL;
+    const cJSON *usage = json_get_object(root, "usage");
     const char *preview = message ? json_get_string_value(message, "final_text_preview") : NULL;
     const char *data = audio ? json_get_string_value(audio, "data") : NULL;
+    if (usage) {
+        parsed->prompt_tokens = json_get_int_value(usage, "prompt_tokens", -1);
+        parsed->completion_tokens = json_get_int_value(usage, "completion_tokens", -1);
+        parsed->total_tokens = json_get_int_value(usage, "total_tokens", -1);
+    }
     if (preview) {
-        *final_preview = utf8_to_utf16(preview);
+        parsed->final_text_preview = utf8_to_utf16(preview);
     } else {
-        *final_preview = wcs_dup_or_empty(L"");
+        parsed->final_text_preview = wcs_dup_or_empty(L"");
     }
     BOOL ok = FALSE;
-    if (!data || !decode_base64(data, audio_data, audio_size)) {
+    BYTE *encoded = NULL;
+    DWORD encoded_size = 0;
+    if (!data || !decode_base64(data, &encoded, &encoded_size)) {
         if (error_text) {
             *error_text = wcs_dup_or_empty(L"响应中缺少可解码的 audio.data。");
         }
     } else {
-        ok = TRUE;
+        ok = decode_audio_to_pcm(encoded, encoded_size, input_format, &parsed->pcm_data, &parsed->pcm_size, error_text);
+        if (ok) {
+            parsed->audio_duration_ms = audio_duration_ms_from_pcm_size(parsed->pcm_size);
+        }
     }
+    free(encoded);
     cJSON_Delete(root);
     return ok;
 }
@@ -318,39 +350,43 @@ static BOOL decode_with_media_foundation(const BYTE *data, DWORD size, BYTE **pc
     return TRUE;
 }
 
-static BOOL convert_to_playback_pcm(const AudioBuffer *buffer, BYTE **pcm, DWORD *pcm_size, wchar_t **error_text) {
-    if (_wcsicmp(buffer->format, L"pcm") == 0 || _wcsicmp(buffer->format, L"pcm16") == 0) {
-        BYTE *copy = (BYTE *)malloc(buffer->size);
+static BOOL decode_audio_to_pcm(const BYTE *data, DWORD size, const wchar_t *format,
+                                BYTE **pcm, DWORD *pcm_size, wchar_t **error_text) {
+    if (_wcsicmp(format ? format : L"", L"pcm") == 0 || _wcsicmp(format ? format : L"", L"pcm16") == 0) {
+        BYTE *copy = (BYTE *)malloc(size);
         if (!copy) {
             return FALSE;
         }
-        memcpy(copy, buffer->data, buffer->size);
+        memcpy(copy, data, size);
         *pcm = copy;
-        *pcm_size = buffer->size;
+        *pcm_size = size;
         return TRUE;
     }
-    if (wav_extract_pcm_copy(buffer->data, buffer->size, pcm, pcm_size)) {
+    if (wav_extract_pcm_copy(data, size, pcm, pcm_size)) {
         return TRUE;
     }
-    return decode_with_media_foundation(buffer->data, buffer->size, pcm, pcm_size, error_text);
+    return decode_with_media_foundation(data, size, pcm, pcm_size, error_text);
 }
 
 BOOL audio_play(const AudioBuffer *buffer, wchar_t **error_text) {
     if (error_text) {
         *error_text = NULL;
     }
-    if (!buffer || !buffer->data || buffer->size == 0 || !g_xaudio) {
+    if (!buffer || !buffer->pcm_data || buffer->pcm_size == 0 || !g_xaudio) {
         if (error_text) {
             *error_text = wcs_dup_or_empty(L"没有可播放的音频。");
         }
         return FALSE;
     }
     audio_stop();
-    BYTE *pcm = NULL;
-    DWORD pcm_size = 0;
-    if (!convert_to_playback_pcm(buffer, &pcm, &pcm_size, error_text)) {
+    BYTE *pcm = (BYTE *)malloc(buffer->pcm_size);
+    if (!pcm) {
+        if (error_text) {
+            *error_text = wcs_dup_or_empty(L"无法分配播放缓冲区。");
+        }
         return FALSE;
     }
+    memcpy(pcm, buffer->pcm_data, buffer->pcm_size);
     WAVEFORMATEX fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.wFormatTag = WAVE_FORMAT_PCM;
@@ -369,7 +405,7 @@ BOOL audio_play(const AudioBuffer *buffer, wchar_t **error_text) {
     }
     XAUDIO2_BUFFER xa_buffer;
     memset(&xa_buffer, 0, sizeof(xa_buffer));
-    xa_buffer.AudioBytes = pcm_size;
+    xa_buffer.AudioBytes = buffer->pcm_size;
     xa_buffer.pAudioData = pcm;
     xa_buffer.Flags = XAUDIO2_END_OF_STREAM;
     hr = IXAudio2SourceVoice_SubmitSourceBuffer(g_source_voice, &xa_buffer, NULL);
@@ -386,7 +422,7 @@ BOOL audio_play(const AudioBuffer *buffer, wchar_t **error_text) {
         return FALSE;
     }
     g_playback_pcm = pcm;
-    g_playback_pcm_size = pcm_size;
+    g_playback_pcm_size = buffer->pcm_size;
     LONG generation = InterlockedIncrement(&g_playback_generation);
     InterlockedExchange(&g_playing, 1);
     PlaybackMonitorArgs *args = (PlaybackMonitorArgs *)calloc(1, sizeof(PlaybackMonitorArgs));
@@ -440,7 +476,9 @@ static BOOL write_wav_file(const wchar_t *path, const BYTE *pcm, DWORD pcm_size)
     return ok;
 }
 
-static BOOL write_mp3_file(const wchar_t *path, const BYTE *pcm, DWORD pcm_size, wchar_t **error_text) {
+static BOOL write_encoded_audio_file_with_sample_rate(const wchar_t *path, const BYTE *pcm, DWORD pcm_size,
+                                                      const GUID *subtype, DWORD avg_bytes_per_sec,
+                                                      DWORD output_sample_rate, wchar_t **error_text) {
     IMFSinkWriter *writer = NULL;
     IMFMediaType *output_type = NULL;
     IMFMediaType *input_type = NULL;
@@ -453,10 +491,10 @@ static BOOL write_mp3_file(const wchar_t *path, const BYTE *pcm, DWORD pcm_size,
     }
     if (SUCCEEDED(hr)) {
         IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
-        IMFMediaType_SetGUID(output_type, &MF_MT_SUBTYPE, &MFAudioFormat_MP3);
+        IMFMediaType_SetGUID(output_type, &MF_MT_SUBTYPE, subtype);
         IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_NUM_CHANNELS, PCM_CHANNELS);
-        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100);
-        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000);
+        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, output_sample_rate);
+        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, avg_bytes_per_sec);
         hr = IMFSinkWriter_AddStream(writer, output_type, &stream);
     }
     if (SUCCEEDED(hr)) {
@@ -528,55 +566,49 @@ static BOOL write_mp3_file(const wchar_t *path, const BYTE *pcm, DWORD pcm_size,
     return TRUE;
 }
 
+static BOOL write_encoded_audio_file(const wchar_t *path, const BYTE *pcm, DWORD pcm_size,
+                                     const GUID *subtype, DWORD avg_bytes_per_sec, wchar_t **error_text) {
+    DWORD sample_rates[] = { PCM_SAMPLE_RATE, 32000, 44100, 48000 };
+    wchar_t *last_error = NULL;
+    for (int i = 0; i < (int)ARRAYSIZE(sample_rates); ++i) {
+        free(last_error);
+        last_error = NULL;
+        if (write_encoded_audio_file_with_sample_rate(path, pcm, pcm_size, subtype, avg_bytes_per_sec,
+                                                      sample_rates[i], &last_error)) {
+            free(last_error);
+            return TRUE;
+        }
+    }
+    if (error_text) {
+        *error_text = last_error ? last_error : wcs_dup_or_empty(L"音频编码失败。");
+    } else {
+        free(last_error);
+    }
+    return FALSE;
+}
+
 BOOL audio_save_to_file(const AudioBuffer *buffer, const wchar_t *path, wchar_t **error_text) {
     if (error_text) {
         *error_text = NULL;
     }
-    if (!buffer || !buffer->data || buffer->size == 0) {
+    if (!buffer || !buffer->pcm_data || buffer->pcm_size == 0) {
         if (error_text) {
             *error_text = wcs_dup_or_empty(L"没有可保存的音频。");
         }
         return FALSE;
     }
     const wchar_t *ext = wcsrchr(path, L'.');
-    if (ext && _wcsicmp(ext, L".pcm") == 0) {
-        if (_wcsicmp(buffer->format, L"pcm") == 0 || _wcsicmp(buffer->format, L"pcm16") == 0) {
-            return write_file_bytes(path, buffer->data, buffer->size);
-        }
-        BYTE *pcm = NULL;
-        DWORD pcm_size = 0;
-        BOOL ok = convert_to_playback_pcm(buffer, &pcm, &pcm_size, error_text);
-        if (ok) {
-            ok = write_file_bytes(path, pcm, pcm_size);
-        }
-        free(pcm);
-        return ok;
+    if (!ext || _wcsicmp(ext, L".wav") == 0) {
+        return write_wav_file(path, buffer->pcm_data, buffer->pcm_size);
     }
-    if (ext && _wcsicmp(ext, L".wav") == 0) {
-        if (looks_like_wav(buffer->data, buffer->size)) {
-            return write_file_bytes(path, buffer->data, buffer->size);
-        }
-        BYTE *pcm = NULL;
-        DWORD pcm_size = 0;
-        BOOL ok = convert_to_playback_pcm(buffer, &pcm, &pcm_size, error_text);
-        if (ok) {
-            ok = write_wav_file(path, pcm, pcm_size);
-        }
-        free(pcm);
-        return ok;
+    if (_wcsicmp(ext, L".mp3") == 0) {
+        return write_encoded_audio_file(path, buffer->pcm_data, buffer->pcm_size, &MFAudioFormat_MP3, 8000, error_text);
     }
-    if (ext && _wcsicmp(ext, L".mp3") == 0 && _wcsicmp(buffer->format, L"mp3") == 0) {
-        return write_file_bytes(path, buffer->data, buffer->size);
+    if (_wcsicmp(ext, L".aac") == 0) {
+        return write_encoded_audio_file(path, buffer->pcm_data, buffer->pcm_size, &MFAudioFormat_AAC, 8000, error_text);
     }
-    if (ext && _wcsicmp(ext, L".mp3") == 0) {
-        BYTE *pcm = NULL;
-        DWORD pcm_size = 0;
-        BOOL ok = convert_to_playback_pcm(buffer, &pcm, &pcm_size, error_text);
-        if (ok) {
-            ok = write_mp3_file(path, pcm, pcm_size, error_text);
-        }
-        free(pcm);
-        return ok;
+    if (error_text) {
+        *error_text = wcs_dup_or_empty(L"不支持的音频保存格式。");
     }
-    return write_file_bytes(path, buffer->data, buffer->size);
+    return FALSE;
 }

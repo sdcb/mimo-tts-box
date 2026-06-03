@@ -35,7 +35,6 @@ static BOOL parse_metadata_text(const wchar_t *dir_name, const char *text, Histo
     assign_wstring_from_json(&record->output_format, root, "OutputFormat");
     int status = json_get_int_value(root, "StatusCode", 0);
     int elapsed = json_get_int_value(root, "ElapsedMs", -1);
-    record->audio_size = (DWORD)json_get_int_value(root, "AudioBytes", 0);
     wchar_t status_text[32];
     if (status > 0) {
         swprintf(status_text, 32, L"%d", status);
@@ -94,7 +93,6 @@ BOOL history_save_pending(const RequestTask *task) {
             cJSON_AddNumberToObject(root, "ElapsedMs", -1);
             json_add_wstring(root, "RequestText", task->audio_text);
             json_add_wstring(root, "OutputFormat", task->output_format);
-            cJSON_AddNumberToObject(root, "AudioBytes", 0);
             cJSON_AddBoolToObject(root, "JsonOk", FALSE);
             cJSON_AddBoolToObject(root, "Pending", TRUE);
             char *json = cJSON_Print(root);
@@ -141,7 +139,6 @@ BOOL history_save_result(const RequestResult *result) {
             cJSON_AddNumberToObject(root, "ElapsedMs", result->elapsed_ms);
             json_add_wstring(root, "RequestText", result->audio_text);
             json_add_wstring(root, "OutputFormat", result->output_format);
-            cJSON_AddNumberToObject(root, "AudioBytes", result->audio_size);
             cJSON_AddBoolToObject(root, "JsonOk", result->json_ok);
             cJSON_AddBoolToObject(root, "Pending", FALSE);
             char *json = cJSON_Print(root);

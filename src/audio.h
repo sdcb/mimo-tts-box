@@ -4,8 +4,9 @@
 
 BOOL audio_system_init(HWND hwnd, wchar_t **error_text);
 void audio_system_shutdown(void);
-BOOL audio_parse_response(const char *response_text, BYTE **audio_data, DWORD *audio_size,
-                          wchar_t **final_preview, wchar_t **error_text);
+void audio_free_parsed_response(ParsedAudioResponse *parsed);
+BOOL audio_parse_response(const char *response_text, const wchar_t *input_format,
+                          ParsedAudioResponse *parsed, wchar_t **error_text);
 BOOL audio_play(const AudioBuffer *buffer, wchar_t **error_text);
 void audio_stop(void);
 BOOL audio_is_playing(void);

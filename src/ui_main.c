@@ -476,6 +476,24 @@ static void format_milliseconds_n(DWORD elapsed_ms, wchar_t *out, size_t out_cou
     swprintf(out, out_count, L"%ls ms", grouped);
 }
 
+static void format_optional_int_n0(int value, wchar_t *out, size_t out_count) {
+    if (value < 0) {
+        swprintf(out, out_count, L"--");
+        return;
+    }
+    format_number_n0((ULONGLONG)value, out, out_count);
+}
+
+static void format_optional_milliseconds_n(int value, wchar_t *out, size_t out_count) {
+    if (value < 0) {
+        swprintf(out, out_count, L"--");
+        return;
+    }
+    wchar_t grouped[64];
+    format_number_n0((ULONGLONG)value, grouped, ARRAYSIZE(grouped));
+    swprintf(out, out_count, L"%ls ms", grouped);
+}
+
 static void load_history_into_list(MainState *s) {
     HistoryRecord *records = NULL;
     int count = 0;
@@ -495,37 +513,47 @@ static void set_active_from_result(MainState *s, RequestResult *result) {
     free_active_response(&s->active);
     s->active.status_code = result->status_code;
     s->active.elapsed_ms = result->elapsed_ms;
-    s->active.audio_size = result->audio_size;
+    s->active.audio_duration_ms = result->audio_duration_ms;
+    s->active.prompt_tokens = result->prompt_tokens;
+    s->active.completion_tokens = result->completion_tokens;
+    s->active.total_tokens = result->total_tokens;
     s->active.request_time = wcs_dup_or_empty(result->history_dir);
     s->active.response_time = wcs_dup_or_empty(result->response_time);
-    s->active.output_format = wcs_dup_or_empty(result->output_format);
     s->active.preview_text = result->success && result->final_text_preview
                                  ? wcs_dup_or_empty(result->final_text_preview)
                                  : (result->error_text ? wcs_dup_or_empty(result->error_text) : utf8_to_utf16(result->response_text));
     s->active.raw_response = utf8_to_utf16(result->response_text ? result->response_text : "");
-    s->active.audio.data = result->audio_data;
-    s->active.audio.size = result->audio_size;
-    wcsncpy(s->active.audio.format, result->output_format ? result->output_format : L"wav", ARRAYSIZE(s->active.audio.format) - 1);
+    s->active.audio.pcm_data = result->pcm_data;
+    s->active.audio.pcm_size = result->pcm_size;
     wcsncpy(s->active.audio.timestamp, result->history_dir ? result->history_dir : L"", ARRAYSIZE(s->active.audio.timestamp) - 1);
-    result->audio_data = NULL;
+    result->pcm_data = NULL;
 }
 
 static void refresh_response_view(MainState *s, BOOL success_like) {
-    wchar_t status[256];
+    wchar_t status[512];
     wchar_t elapsed[64];
-    wchar_t audio_size[64];
+    wchar_t duration[64];
+    wchar_t prompt_tokens[32];
+    wchar_t completion_tokens[32];
+    wchar_t total_tokens[32];
     format_milliseconds_n(s->active.elapsed_ms, elapsed, ARRAYSIZE(elapsed));
-    format_number_n0((ULONGLONG)s->active.audio_size, audio_size, ARRAYSIZE(audio_size));
-    swprintf(status, ARRAYSIZE(status), L"状态码: %lu    响应时间: %ls    音频大小: %ls bytes",
+    format_optional_milliseconds_n(s->active.audio_duration_ms, duration, ARRAYSIZE(duration));
+    format_optional_int_n0(s->active.prompt_tokens, prompt_tokens, ARRAYSIZE(prompt_tokens));
+    format_optional_int_n0(s->active.completion_tokens, completion_tokens, ARRAYSIZE(completion_tokens));
+    format_optional_int_n0(s->active.total_tokens, total_tokens, ARRAYSIZE(total_tokens));
+    swprintf(status, ARRAYSIZE(status), L"状态码: %lu    响应时间: %ls    音频时长: %ls    Tokens: 输入 %ls / 输出 %ls / 总计 %ls",
              (unsigned long)s->active.status_code,
              s->active.elapsed_ms > 0 ? elapsed : L"--",
-             audio_size);
+             duration,
+             prompt_tokens,
+             completion_tokens,
+             total_tokens);
     set_control_text(s->status_static, status);
     set_control_text(s->preview_edit, success_like ? s->active.preview_text : (s->active.raw_response ? s->active.raw_response : s->active.preview_text));
     SendMessageW(s->preview_edit, WM_SETFONT, (WPARAM)(success_like ? s->ui_font : s->mono_font), TRUE);
     update_multiline_scrollbar(s->preview_edit);
-    EnableWindow(s->play_button, s->active.audio.data && s->active.audio.size > 0);
-    EnableWindow(s->save_button, s->active.audio.data && s->active.audio.size > 0);
+    EnableWindow(s->play_button, s->active.audio.pcm_data && s->active.audio.pcm_size > 0);
+    EnableWindow(s->save_button, s->active.audio.pcm_data && s->active.audio.pcm_size > 0);
     EnableWindow(s->stop_button, FALSE);
 }
 
@@ -673,25 +701,29 @@ static void activate_history_record(MainState *s, int index) {
     free_active_response(&s->active);
     s->active.request_time = wcs_dup_or_empty(dir);
     s->active.response_time = wcs_dup_or_empty(meta.response_time);
-    s->active.output_format = wcs_dup_or_empty(meta.output_format);
     s->active.status_code = (DWORD)_wtoi(meta.status_text ? meta.status_text : L"0");
     s->active.elapsed_ms = meta.elapsed_text ? (DWORD)_wtoi(meta.elapsed_text) : 0;
-    s->active.audio_size = meta.audio_size;
-    BYTE *audio_data = NULL;
-    DWORD audio_size = 0;
-    wchar_t *preview = NULL;
+    s->active.audio_duration_ms = -1;
+    s->active.prompt_tokens = -1;
+    s->active.completion_tokens = -1;
+    s->active.total_tokens = -1;
+    ParsedAudioResponse parsed;
     wchar_t *parse_error = NULL;
-    BOOL ok = audio_parse_response(response_json, &audio_data, &audio_size, &preview, &parse_error);
-    s->active.preview_text = ok ? preview : (parse_error ? parse_error : wcs_dup_or_empty(L"历史响应解析失败。"));
-    if (!ok) {
-        free(preview);
-    }
+    BOOL ok = audio_parse_response(response_json, meta.output_format, &parsed, &parse_error);
+    s->active.preview_text = ok ? parsed.final_text_preview : (parse_error ? parse_error : wcs_dup_or_empty(L"历史响应解析失败。"));
     s->active.raw_response = utf8_to_utf16(response_json ? response_json : "");
-    s->active.audio.data = audio_data;
-    s->active.audio.size = audio_size;
-    s->active.audio_size = audio_size;
-    wcsncpy(s->active.audio.format, meta.output_format ? meta.output_format : L"wav", ARRAYSIZE(s->active.audio.format) - 1);
+    if (ok) {
+        s->active.audio.pcm_data = parsed.pcm_data;
+        s->active.audio.pcm_size = parsed.pcm_size;
+        s->active.audio_duration_ms = parsed.audio_duration_ms;
+        s->active.prompt_tokens = parsed.prompt_tokens;
+        s->active.completion_tokens = parsed.completion_tokens;
+        s->active.total_tokens = parsed.total_tokens;
+        parsed.pcm_data = NULL;
+        parsed.final_text_preview = NULL;
+    }
     wcsncpy(s->active.audio.timestamp, dir, ARRAYSIZE(s->active.audio.timestamp) - 1);
+    audio_free_parsed_response(&parsed);
     refresh_response_view(s, ok);
     free(request_json);
     free(response_json);
@@ -706,6 +738,10 @@ static void CALLBACK request_threadpool_proc(PTP_CALLBACK_INSTANCE instance, PVO
         free_request_task(task);
         return;
     }
+    result->audio_duration_ms = -1;
+    result->prompt_tokens = -1;
+    result->completion_tokens = -1;
+    result->total_tokens = -1;
     result->request_id = task->request_id;
     result->list_index = task->list_index;
     result->history_dir = wcs_dup_or_empty(task->history_dir);
@@ -733,8 +769,20 @@ static void CALLBACK request_threadpool_proc(PTP_CALLBACK_INSTANCE instance, PVO
     }
     wchar_t *parse_error = NULL;
     if (transport_ok && http.status_code >= 200 && http.status_code < 300) {
-        result->json_ok = audio_parse_response(result->response_text, &result->audio_data, &result->audio_size,
-                                               &result->final_text_preview, &parse_error);
+        ParsedAudioResponse parsed;
+        result->json_ok = audio_parse_response(result->response_text, task->output_format, &parsed, &parse_error);
+        if (result->json_ok) {
+            result->pcm_data = parsed.pcm_data;
+            result->pcm_size = parsed.pcm_size;
+            result->audio_duration_ms = parsed.audio_duration_ms;
+            result->prompt_tokens = parsed.prompt_tokens;
+            result->completion_tokens = parsed.completion_tokens;
+            result->total_tokens = parsed.total_tokens;
+            result->final_text_preview = parsed.final_text_preview;
+            parsed.pcm_data = NULL;
+            parsed.final_text_preview = NULL;
+        }
+        audio_free_parsed_response(&parsed);
         result->success = result->json_ok;
     }
     if (!result->success) {
@@ -885,7 +933,7 @@ static void on_request_done(MainState *s, RequestResult *result) {
     if (result->request_id == s->latest_request_id) {
         set_active_from_result(s, result);
         refresh_response_view(s, result->success);
-        if (result->success && result->auto_play_on_download && s->active.audio.data && s->active.audio.size > 0) {
+        if (result->success && result->auto_play_on_download && s->active.audio.pcm_data && s->active.audio.pcm_size > 0) {
             on_play(s);
         }
     }
@@ -904,21 +952,21 @@ static void on_play(MainState *s) {
 }
 
 static void on_save(MainState *s) {
-    if (!s->active.audio.data || s->active.audio.size == 0) {
+    if (!s->active.audio.pcm_data || s->active.audio.pcm_size == 0) {
         MessageBoxW(s->hwnd, L"没有可保存的音频。", APP_TITLE, MB_ICONWARNING);
         return;
     }
     wchar_t filename[MAX_PATH];
-    swprintf(filename, ARRAYSIZE(filename), L"%ls.mp3",
+    swprintf(filename, ARRAYSIZE(filename), L"%ls.wav",
              s->active.audio.timestamp[0] ? s->active.audio.timestamp : L"mimo_tts");
     OPENFILENAMEW ofn;
     memset(&ofn, 0, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = s->hwnd;
-    ofn.lpstrFilter = L"Audio Files (*.mp3;*.wav;*.pcm)\0*.mp3;*.wav;*.pcm\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Audio Files (*.wav;*.mp3;*.aac)\0*.wav;*.mp3;*.aac\0WAV Audio (*.wav)\0*.wav\0MP3 Audio (*.mp3)\0*.mp3\0AAC Audio (*.aac)\0*.aac\0";
     ofn.lpstrFile = filename;
     ofn.nMaxFile = ARRAYSIZE(filename);
-    ofn.lpstrDefExt = L"mp3";
+    ofn.lpstrDefExt = L"wav";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
     if (!GetSaveFileNameW(&ofn)) {
         return;
@@ -1111,7 +1159,7 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
     s->format_combo = make_child(s, L"COMBOBOX", L"", CBS_DROPDOWNLIST, 0, IDC_FORMAT_COMBO);
     s->optimize_check = make_child(s, L"BUTTON", L"optimize_text_preview", BS_AUTOCHECKBOX, 0, IDC_OPTIMIZE_CHECK);
     s->auto_play_check = make_child(s, L"BUTTON", L"下载后播放", BS_AUTOCHECKBOX, 0, IDC_AUTO_PLAY_CHECK);
-    s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    音频大小: --", 0, 0, IDC_STATUS_STATIC);
+    s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    音频时长: --    Tokens: --", 0, 0, IDC_STATUS_STATIC);
     s->preview_edit = make_child(s, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, WS_EX_CLIENTEDGE, IDC_PREVIEW_EDIT);
     s->play_button = make_child(s, L"BUTTON", L"\x25b6\xfe0f 播放", BS_PUSHBUTTON, 0, IDC_PLAY_BUTTON);
     s->stop_button = make_child(s, L"BUTTON", L"\x23f9\xfe0f 停止", BS_PUSHBUTTON, 0, IDC_STOP_BUTTON);
@@ -1301,7 +1349,7 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case WM_APP_PLAYBACK_DONE:
         if (s) {
             audio_stop();
-            EnableWindow(s->play_button, s->active.audio.data && s->active.audio.size > 0);
+            EnableWindow(s->play_button, s->active.audio.pcm_data && s->active.audio.pcm_size > 0);
             EnableWindow(s->stop_button, FALSE);
         }
         return 0;

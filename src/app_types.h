@@ -49,21 +49,32 @@ typedef struct AppConfig {
 } AppConfig;
 
 typedef struct AudioBuffer {
-    BYTE *data;
-    DWORD size;
-    wchar_t format[16];
+    BYTE *pcm_data;
+    DWORD pcm_size;
     wchar_t timestamp[32];
 } AudioBuffer;
+
+typedef struct ParsedAudioResponse {
+    BYTE *pcm_data;
+    DWORD pcm_size;
+    int audio_duration_ms;
+    int prompt_tokens;
+    int completion_tokens;
+    int total_tokens;
+    wchar_t *final_text_preview;
+} ParsedAudioResponse;
 
 typedef struct ActiveResponse {
     DWORD status_code;
     DWORD elapsed_ms;
-    DWORD audio_size;
+    int audio_duration_ms;
+    int prompt_tokens;
+    int completion_tokens;
+    int total_tokens;
     wchar_t *request_time;
     wchar_t *response_time;
     wchar_t *preview_text;
     wchar_t *raw_response;
-    wchar_t *output_format;
     AudioBuffer audio;
 } ActiveResponse;
 
@@ -76,7 +87,6 @@ typedef struct HistoryRecord {
     wchar_t *request_text;
     wchar_t *url;
     wchar_t *output_format;
-    DWORD audio_size;
 } HistoryRecord;
 
 typedef struct RequestTask {
@@ -109,8 +119,12 @@ typedef struct RequestResult {
     char *response_text;
     wchar_t *error_text;
     wchar_t *final_text_preview;
-    BYTE *audio_data;
-    DWORD audio_size;
+    BYTE *pcm_data;
+    DWORD pcm_size;
+    int audio_duration_ms;
+    int prompt_tokens;
+    int completion_tokens;
+    int total_tokens;
     DWORD status_code;
     DWORD elapsed_ms;
     BOOL auto_play_on_download;
