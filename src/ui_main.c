@@ -473,7 +473,7 @@ static void format_number_n0(ULONGLONG value, wchar_t *out, size_t out_count) {
 static void format_milliseconds_n(DWORD elapsed_ms, wchar_t *out, size_t out_count) {
     wchar_t grouped[64];
     format_number_n0((ULONGLONG)elapsed_ms, grouped, ARRAYSIZE(grouped));
-    swprintf(out, out_count, L"%ls.00 ms", grouped);
+    swprintf(out, out_count, L"%ls ms", grouped);
 }
 
 static void load_history_into_list(MainState *s) {
@@ -513,11 +513,13 @@ static void set_active_from_result(MainState *s, RequestResult *result) {
 static void refresh_response_view(MainState *s, BOOL success_like) {
     wchar_t status[256];
     wchar_t elapsed[64];
+    wchar_t audio_size[64];
     format_milliseconds_n(s->active.elapsed_ms, elapsed, ARRAYSIZE(elapsed));
-    swprintf(status, ARRAYSIZE(status), L"状态码: %lu    响应时间: %ls    响应大小: %lu bytes",
+    format_number_n0((ULONGLONG)s->active.audio_size, audio_size, ARRAYSIZE(audio_size));
+    swprintf(status, ARRAYSIZE(status), L"状态码: %lu    响应时间: %ls    音频大小: %ls bytes",
              (unsigned long)s->active.status_code,
              s->active.elapsed_ms > 0 ? elapsed : L"--",
-             (unsigned long)s->active.audio_size);
+             audio_size);
     set_control_text(s->status_static, status);
     set_control_text(s->preview_edit, success_like ? s->active.preview_text : (s->active.raw_response ? s->active.raw_response : s->active.preview_text));
     SendMessageW(s->preview_edit, WM_SETFONT, (WPARAM)(success_like ? s->ui_font : s->mono_font), TRUE);
@@ -1109,7 +1111,7 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
     s->format_combo = make_child(s, L"COMBOBOX", L"", CBS_DROPDOWNLIST, 0, IDC_FORMAT_COMBO);
     s->optimize_check = make_child(s, L"BUTTON", L"optimize_text_preview", BS_AUTOCHECKBOX, 0, IDC_OPTIMIZE_CHECK);
     s->auto_play_check = make_child(s, L"BUTTON", L"下载后播放", BS_AUTOCHECKBOX, 0, IDC_AUTO_PLAY_CHECK);
-    s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    响应大小: --", 0, 0, IDC_STATUS_STATIC);
+    s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    音频大小: --", 0, 0, IDC_STATUS_STATIC);
     s->preview_edit = make_child(s, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, WS_EX_CLIENTEDGE, IDC_PREVIEW_EDIT);
     s->play_button = make_child(s, L"BUTTON", L"\x25b6\xfe0f 播放", BS_PUSHBUTTON, 0, IDC_PLAY_BUTTON);
     s->stop_button = make_child(s, L"BUTTON", L"\x23f9\xfe0f 停止", BS_PUSHBUTTON, 0, IDC_STOP_BUTTON);
