@@ -76,6 +76,45 @@ typedef struct ConfigDialogState {
     BOOL done;
 } ConfigDialogState;
 
+typedef struct DpiMetrics {
+    int margin;
+    int url_h;
+    int min_w;
+    int min_h;
+    int window_w;
+    int window_h;
+    int send_w;
+    int splitter;
+    int splitter_line;
+    int initial_main_split;
+    int initial_vertical_split;
+    int initial_request_split;
+    int main_split_min;
+    int main_right_min;
+    int split_pane_min;
+    int label_h;
+    int bottom_controls_h;
+    int controls_y_offset;
+    int combo_drop_h;
+    int voice_w;
+    int format_x;
+    int format_w;
+    int optimize_x;
+    int optimize_w;
+    int auto_play_x;
+    int auto_play_w;
+    int check_h;
+    int resp_button_w;
+    int resp_button_h;
+    int resp_button_step;
+    int resp_gap;
+    int status_h;
+    int status_code_w;
+    int status_elapsed_w;
+    int status_duration_w;
+    int status_tokens_min_w;
+} DpiMetrics;
+
 static const wchar_t *VOICE_ITEMS[] = { L"mimo_default", L"冰糖", L"茉莉", L"苏打", L"白桦", L"Mia", L"Chloe", L"Milo", L"Dean" };
 static const wchar_t *FORMAT_ITEMS[] = { L"wav", L"mp3", L"pcm" };
 static const wchar_t *ABOUT_GITHUB_URL = L"https://github.com/sdcb/mimo-tts-box";
@@ -89,7 +128,7 @@ static LRESULT CALLBACK main_child_subclass_proc(HWND hwnd, UINT msg, WPARAM wpa
 static void update_multiline_scrollbar(HWND edit);
 static void refresh_multiline_scrollbars(MainState *s);
 static void on_play(MainState *s);
-static void layout_response_status_bar(MainState *s, int x, int y, int width, int height);
+static void layout_response_status_bar(MainState *s, const DpiMetrics *metrics, int x, int y, int width, int height);
 static void set_response_status_bar_text(MainState *s, const wchar_t *status_code, const wchar_t *elapsed,
                                          const wchar_t *duration, const wchar_t *prompt_tokens,
                                          const wchar_t *completion_tokens, const wchar_t *total_tokens);
@@ -109,6 +148,48 @@ static int dpi_from_hwnd(HWND hwnd) {
 
 static int scale_for_dpi(int value, int dpi) {
     return MulDiv(value, dpi > 0 ? dpi : 96, 96);
+}
+
+static DpiMetrics make_dpi_metrics(int dpi) {
+    DpiMetrics metrics;
+    memset(&metrics, 0, sizeof(metrics));
+    metrics.margin = scale_for_dpi(8, dpi);
+    metrics.url_h = scale_for_dpi(30, dpi);
+    metrics.min_w = scale_for_dpi(640, dpi);
+    metrics.min_h = scale_for_dpi(480, dpi);
+    metrics.window_w = scale_for_dpi(800, dpi);
+    metrics.window_h = scale_for_dpi(600, dpi);
+    metrics.send_w = scale_for_dpi(120, dpi);
+    metrics.splitter = scale_for_dpi(SPLITTER_HIT_SIZE, dpi);
+    metrics.splitter_line = max(1, scale_for_dpi(SPLITTER_LINE_SIZE, dpi));
+    metrics.initial_main_split = scale_for_dpi(260, dpi);
+    metrics.initial_vertical_split = scale_for_dpi(270, dpi);
+    metrics.initial_request_split = scale_for_dpi(260, dpi);
+    metrics.main_split_min = scale_for_dpi(180, dpi);
+    metrics.main_right_min = scale_for_dpi(300, dpi);
+    metrics.split_pane_min = scale_for_dpi(170, dpi);
+    metrics.label_h = scale_for_dpi(20, dpi);
+    metrics.bottom_controls_h = scale_for_dpi(34, dpi);
+    metrics.controls_y_offset = scale_for_dpi(5, dpi);
+    metrics.combo_drop_h = scale_for_dpi(400, dpi);
+    metrics.voice_w = scale_for_dpi(120, dpi);
+    metrics.format_x = scale_for_dpi(130, dpi);
+    metrics.format_w = scale_for_dpi(90, dpi);
+    metrics.optimize_x = scale_for_dpi(230, dpi);
+    metrics.optimize_w = scale_for_dpi(170, dpi);
+    metrics.auto_play_x = scale_for_dpi(405, dpi);
+    metrics.auto_play_w = scale_for_dpi(115, dpi);
+    metrics.check_h = scale_for_dpi(24, dpi);
+    metrics.resp_button_w = scale_for_dpi(88, dpi);
+    metrics.resp_button_h = scale_for_dpi(28, dpi);
+    metrics.resp_button_step = scale_for_dpi(96, dpi);
+    metrics.resp_gap = scale_for_dpi(6, dpi);
+    metrics.status_h = scale_for_dpi(24, dpi);
+    metrics.status_code_w = scale_for_dpi(96, dpi);
+    metrics.status_elapsed_w = scale_for_dpi(128, dpi);
+    metrics.status_duration_w = scale_for_dpi(128, dpi);
+    metrics.status_tokens_min_w = scale_for_dpi(180, dpi);
+    return metrics;
 }
 
 static HFONT create_ui_font(HWND hwnd) {
@@ -997,86 +1078,88 @@ static void on_save(MainState *s) {
 }
 
 static void layout_controls(MainState *s) {
+    DpiMetrics metrics = make_dpi_metrics(s->dpi);
     RECT rc;
     GetClientRect(s->hwnd, &rc);
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
-    int margin = scale_for_dpi(8, s->dpi);
-    int url_h = scale_for_dpi(30, s->dpi);
-    int bottom_y = margin + url_h + margin;
-    if (w < scale_for_dpi(640, s->dpi)) {
-        w = scale_for_dpi(640, s->dpi);
+    int bottom_y = metrics.margin + metrics.url_h + metrics.margin;
+    if (w < metrics.min_w) {
+        w = metrics.min_w;
     }
-    if (h < scale_for_dpi(480, s->dpi)) {
-        h = scale_for_dpi(480, s->dpi);
+    if (h < metrics.min_h) {
+        h = metrics.min_h;
     }
-    int send_w = scale_for_dpi(120, s->dpi);
-    MoveWindow(s->url_edit, margin, margin, w - send_w - margin * 3, url_h, TRUE);
-    MoveWindow(s->send_button, w - send_w - margin, margin, send_w, url_h, TRUE);
+    MoveWindow(s->url_edit, metrics.margin, metrics.margin, w - metrics.send_w - metrics.margin * 3,
+               metrics.url_h, TRUE);
+    MoveWindow(s->send_button, w - metrics.send_w - metrics.margin, metrics.margin, metrics.send_w,
+               metrics.url_h, TRUE);
 
     int main_top = bottom_y;
-    int main_h = h - main_top - margin;
-    if (s->main_split < scale_for_dpi(180, s->dpi)) {
-        s->main_split = scale_for_dpi(180, s->dpi);
+    int main_h = h - main_top - metrics.margin;
+    if (s->main_split < metrics.main_split_min) {
+        s->main_split = metrics.main_split_min;
     }
-    if (s->main_split > w - scale_for_dpi(300, s->dpi)) {
-        s->main_split = w - scale_for_dpi(300, s->dpi);
+    if (s->main_split > w - metrics.main_right_min) {
+        s->main_split = w - metrics.main_right_min;
     }
-    int splitter = scale_for_dpi(SPLITTER_HIT_SIZE, s->dpi);
     int left_w = s->main_split;
-    int right_x = margin + left_w + splitter;
-    int right_w = w - right_x - margin;
-    MoveWindow(s->list, margin, main_top, left_w, main_h, TRUE);
+    int right_x = metrics.margin + left_w + metrics.splitter;
+    int right_w = w - right_x - metrics.margin;
+    MoveWindow(s->list, metrics.margin, main_top, left_w, main_h, TRUE);
 
-    if (s->vertical_split < scale_for_dpi(170, s->dpi)) {
-        s->vertical_split = scale_for_dpi(170, s->dpi);
+    if (s->vertical_split < metrics.split_pane_min) {
+        s->vertical_split = metrics.split_pane_min;
     }
-    if (s->vertical_split > main_h - scale_for_dpi(170, s->dpi)) {
-        s->vertical_split = main_h - scale_for_dpi(170, s->dpi);
+    if (s->vertical_split > main_h - metrics.split_pane_min) {
+        s->vertical_split = main_h - metrics.split_pane_min;
     }
     int req_h = s->vertical_split;
-    int resp_y = main_top + req_h + splitter;
-    int resp_h = main_h - req_h - splitter;
-    int label_h = scale_for_dpi(20, s->dpi);
-    int bottom_controls_h = scale_for_dpi(34, s->dpi);
-    if (s->request_split < scale_for_dpi(170, s->dpi)) {
-        s->request_split = scale_for_dpi(170, s->dpi);
+    int resp_y = main_top + req_h + metrics.splitter;
+    int resp_h = main_h - req_h - metrics.splitter;
+    if (s->request_split < metrics.split_pane_min) {
+        s->request_split = metrics.split_pane_min;
     }
-    if (s->request_split > right_w - scale_for_dpi(170, s->dpi)) {
-        s->request_split = right_w - scale_for_dpi(170, s->dpi);
+    if (s->request_split > right_w - metrics.split_pane_min) {
+        s->request_split = right_w - metrics.split_pane_min;
     }
     int style_w = s->request_split;
-    int text_x = right_x + style_w + splitter;
-    int text_w = right_w - style_w - splitter;
-    MoveWindow(s->style_label, right_x, main_top, style_w, label_h, TRUE);
-    MoveWindow(s->text_label, text_x, main_top, text_w, label_h, TRUE);
-    MoveWindow(s->style_edit, right_x, main_top + label_h, style_w, req_h - label_h - bottom_controls_h, TRUE);
-    MoveWindow(s->text_edit, text_x, main_top + label_h, text_w, req_h - label_h - bottom_controls_h, TRUE);
-    int controls_y = main_top + req_h - bottom_controls_h + scale_for_dpi(5, s->dpi);
-    MoveWindow(s->voice_combo, right_x, controls_y, scale_for_dpi(120, s->dpi), scale_for_dpi(400, s->dpi), TRUE);
-    MoveWindow(s->format_combo, right_x + scale_for_dpi(130, s->dpi), controls_y, scale_for_dpi(90, s->dpi), scale_for_dpi(400, s->dpi), TRUE);
-    MoveWindow(s->optimize_check, right_x + scale_for_dpi(230, s->dpi), controls_y, scale_for_dpi(170, s->dpi), scale_for_dpi(24, s->dpi), TRUE);
-    MoveWindow(s->auto_play_check, right_x + scale_for_dpi(405, s->dpi), controls_y, scale_for_dpi(115, s->dpi), scale_for_dpi(24, s->dpi), TRUE);
+    int text_x = right_x + style_w + metrics.splitter;
+    int text_w = right_w - style_w - metrics.splitter;
+    MoveWindow(s->style_label, right_x, main_top, style_w, metrics.label_h, TRUE);
+    MoveWindow(s->text_label, text_x, main_top, text_w, metrics.label_h, TRUE);
+    MoveWindow(s->style_edit, right_x, main_top + metrics.label_h, style_w,
+               req_h - metrics.label_h - metrics.bottom_controls_h, TRUE);
+    MoveWindow(s->text_edit, text_x, main_top + metrics.label_h, text_w,
+               req_h - metrics.label_h - metrics.bottom_controls_h, TRUE);
+    int controls_y = main_top + req_h - metrics.bottom_controls_h + metrics.controls_y_offset;
+    MoveWindow(s->voice_combo, right_x, controls_y, metrics.voice_w, metrics.combo_drop_h, TRUE);
+    MoveWindow(s->format_combo, right_x + metrics.format_x, controls_y, metrics.format_w,
+               metrics.combo_drop_h, TRUE);
+    MoveWindow(s->optimize_check, right_x + metrics.optimize_x, controls_y, metrics.optimize_w,
+               metrics.check_h, TRUE);
+    MoveWindow(s->auto_play_check, right_x + metrics.auto_play_x, controls_y, metrics.auto_play_w,
+               metrics.check_h, TRUE);
 
-    int resp_button_h = scale_for_dpi(28, s->dpi);
-    int resp_gap = scale_for_dpi(6, s->dpi);
-    int status_h = scale_for_dpi(24, s->dpi);
-    MoveWindow(s->play_button, right_x, resp_y, scale_for_dpi(88, s->dpi), resp_button_h, TRUE);
-    MoveWindow(s->stop_button, right_x + scale_for_dpi(96, s->dpi), resp_y, scale_for_dpi(88, s->dpi), resp_button_h, TRUE);
-    MoveWindow(s->save_button, right_x + scale_for_dpi(192, s->dpi), resp_y, scale_for_dpi(88, s->dpi), resp_button_h, TRUE);
-    MoveWindow(s->preview_edit, right_x, resp_y + resp_button_h + resp_gap, right_w,
-               resp_h - resp_button_h - resp_gap - status_h - resp_gap, TRUE);
-    layout_response_status_bar(s, right_x, resp_y + resp_h - status_h, right_w, status_h);
+    MoveWindow(s->play_button, right_x, resp_y, metrics.resp_button_w, metrics.resp_button_h, TRUE);
+    MoveWindow(s->stop_button, right_x + metrics.resp_button_step, resp_y, metrics.resp_button_w,
+               metrics.resp_button_h, TRUE);
+    MoveWindow(s->save_button, right_x + metrics.resp_button_step * 2, resp_y, metrics.resp_button_w,
+               metrics.resp_button_h, TRUE);
+    MoveWindow(s->preview_edit, right_x, resp_y + metrics.resp_button_h + metrics.resp_gap, right_w,
+               resp_h - metrics.resp_button_h - metrics.resp_gap - metrics.status_h - metrics.resp_gap, TRUE);
+    layout_response_status_bar(s, &metrics, right_x, resp_y + resp_h - metrics.status_h, right_w,
+                               metrics.status_h);
     refresh_multiline_scrollbars(s);
     InvalidateRect(s->hwnd, NULL, TRUE);
 }
 
-static void layout_response_status_bar(MainState *s, int x, int y, int width, int height) {
+static void layout_response_status_bar(MainState *s, const DpiMetrics *metrics, int x, int y, int width, int height) {
     int parts[STATUS_BAR_PART_COUNT];
-    int status_w = scale_for_dpi(96, s->dpi);
-    int elapsed_w = scale_for_dpi(128, s->dpi);
-    int duration_w = scale_for_dpi(128, s->dpi);
-    if (width < status_w + elapsed_w + duration_w + scale_for_dpi(180, s->dpi)) {
+    int status_w = metrics->status_code_w;
+    int elapsed_w = metrics->status_elapsed_w;
+    int duration_w = metrics->status_duration_w;
+    if (width < status_w + elapsed_w + duration_w + metrics->status_tokens_min_w) {
         status_w = width / STATUS_BAR_PART_COUNT;
         elapsed_w = width / STATUS_BAR_PART_COUNT;
         duration_w = width / STATUS_BAR_PART_COUNT;
@@ -1095,17 +1178,19 @@ static BOOL hit_rect_point(RECT rc, int x, int y) {
 }
 
 static DragMode hit_test_splitter(MainState *s, int x, int y) {
+    DpiMetrics metrics = make_dpi_metrics(s->dpi);
     RECT rc;
     GetClientRect(s->hwnd, &rc);
-    int margin = scale_for_dpi(8, s->dpi);
-    int main_top = margin + scale_for_dpi(30, s->dpi) + margin;
-    int main_h = rc.bottom - main_top - margin;
-    int splitter = scale_for_dpi(SPLITTER_HIT_SIZE, s->dpi);
-    RECT main_sp = { margin + s->main_split, main_top, margin + s->main_split + splitter, main_top + main_h };
-    int right_x = margin + s->main_split + splitter;
-    int right_w = rc.right - right_x - margin;
-    RECT vertical_sp = { right_x, main_top + s->vertical_split, right_x + right_w, main_top + s->vertical_split + splitter };
-    RECT request_sp = { right_x + s->request_split, main_top, right_x + s->request_split + splitter, main_top + s->vertical_split };
+    int main_top = metrics.margin + metrics.url_h + metrics.margin;
+    int main_h = rc.bottom - main_top - metrics.margin;
+    RECT main_sp = { metrics.margin + s->main_split, main_top,
+                     metrics.margin + s->main_split + metrics.splitter, main_top + main_h };
+    int right_x = metrics.margin + s->main_split + metrics.splitter;
+    int right_w = rc.right - right_x - metrics.margin;
+    RECT vertical_sp = { right_x, main_top + s->vertical_split, right_x + right_w,
+                         main_top + s->vertical_split + metrics.splitter };
+    RECT request_sp = { right_x + s->request_split, main_top, right_x + s->request_split + metrics.splitter,
+                        main_top + s->vertical_split };
     if (hit_rect_point(main_sp, x, y)) {
         return DRAG_MAIN;
     }
@@ -1119,24 +1204,22 @@ static DragMode hit_test_splitter(MainState *s, int x, int y) {
 }
 
 static void paint_splitters(MainState *s, HDC hdc) {
+    DpiMetrics metrics = make_dpi_metrics(s->dpi);
     RECT rc;
     GetClientRect(s->hwnd, &rc);
-    int margin = scale_for_dpi(8, s->dpi);
-    int main_top = margin + scale_for_dpi(30, s->dpi) + margin;
-    int main_h = rc.bottom - main_top - margin;
-    int splitter = scale_for_dpi(SPLITTER_HIT_SIZE, s->dpi);
-    int line = max(1, scale_for_dpi(SPLITTER_LINE_SIZE, s->dpi));
+    int main_top = metrics.margin + metrics.url_h + metrics.margin;
+    int main_h = rc.bottom - main_top - metrics.margin;
     HBRUSH brush = CreateSolidBrush(RGB(224, 228, 233));
-    int main_line_x = margin + s->main_split + (splitter - line) / 2;
-    RECT r1 = { main_line_x, main_top, main_line_x + line, main_top + main_h };
+    int main_line_x = metrics.margin + s->main_split + (metrics.splitter - metrics.splitter_line) / 2;
+    RECT r1 = { main_line_x, main_top, main_line_x + metrics.splitter_line, main_top + main_h };
     FillRect(hdc, &r1, brush);
-    int right_x = margin + s->main_split + splitter;
-    int right_w = rc.right - right_x - margin;
-    int vertical_line_y = main_top + s->vertical_split + (splitter - line) / 2;
-    RECT r2 = { right_x, vertical_line_y, right_x + right_w, vertical_line_y + line };
+    int right_x = metrics.margin + s->main_split + metrics.splitter;
+    int right_w = rc.right - right_x - metrics.margin;
+    int vertical_line_y = main_top + s->vertical_split + (metrics.splitter - metrics.splitter_line) / 2;
+    RECT r2 = { right_x, vertical_line_y, right_x + right_w, vertical_line_y + metrics.splitter_line };
     FillRect(hdc, &r2, brush);
-    int request_line_x = right_x + s->request_split + (splitter - line) / 2;
-    RECT r3 = { request_line_x, main_top, request_line_x + line, main_top + s->vertical_split };
+    int request_line_x = right_x + s->request_split + (metrics.splitter - metrics.splitter_line) / 2;
+    RECT r3 = { request_line_x, main_top, request_line_x + metrics.splitter_line, main_top + s->vertical_split };
     FillRect(hdc, &r3, brush);
     DeleteObject(brush);
 }
@@ -1169,9 +1252,10 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
     s->hwnd = hwnd;
     s->config = (AppConfig *)cs->lpCreateParams;
     s->dpi = dpi_from_hwnd(hwnd);
-    s->main_split = scale_for_dpi(260, s->dpi);
-    s->vertical_split = scale_for_dpi(270, s->dpi);
-    s->request_split = scale_for_dpi(260, s->dpi);
+    DpiMetrics metrics = make_dpi_metrics(s->dpi);
+    s->main_split = metrics.initial_main_split;
+    s->vertical_split = metrics.initial_vertical_split;
+    s->request_split = metrics.initial_request_split;
     HDC hdc = GetDC(hwnd);
     int ui_height = -MulDiv(9, GetDeviceCaps(hdc, LOGPIXELSY), 72);
     ReleaseDC(hwnd, hdc);
@@ -1229,9 +1313,10 @@ BOOL ui_register_main_window(HINSTANCE instance) {
 
 HWND ui_create_main_window(HINSTANCE instance, AppConfig *config) {
     int dpi = dpi_from_hwnd(NULL);
+    DpiMetrics metrics = make_dpi_metrics(dpi);
     return CreateWindowExW(0, L"MimoTTSBoxMainWindow", APP_TITLE,
                            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                           CW_USEDEFAULT, CW_USEDEFAULT, scale_for_dpi(800, dpi), scale_for_dpi(600, dpi),
+                           CW_USEDEFAULT, CW_USEDEFAULT, metrics.window_w, metrics.window_h,
                            NULL, NULL, instance, config);
 }
 
@@ -1248,8 +1333,9 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case WM_GETMINMAXINFO: {
         MINMAXINFO *info = (MINMAXINFO *)lparam;
         int dpi = s ? s->dpi : 96;
-        info->ptMinTrackSize.x = scale_for_dpi(640, dpi);
-        info->ptMinTrackSize.y = scale_for_dpi(480, dpi);
+        DpiMetrics metrics = make_dpi_metrics(dpi);
+        info->ptMinTrackSize.x = metrics.min_w;
+        info->ptMinTrackSize.y = metrics.min_h;
         return 0;
     }
     case WM_CTLCOLORSTATIC:
@@ -1342,13 +1428,11 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 DragMode hit = hit_test_splitter(s, x, y);
                 SetCursor(LoadCursor(NULL, hit == DRAG_VERTICAL ? IDC_SIZENS : (hit == DRAG_NONE ? IDC_ARROW : IDC_SIZEWE)));
             } else {
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                int margin = scale_for_dpi(8, s->dpi);
-                int main_top = margin + scale_for_dpi(30, s->dpi) + margin;
-                int right_x = margin + s->main_split + scale_for_dpi(SPLITTER_HIT_SIZE, s->dpi);
+                DpiMetrics metrics = make_dpi_metrics(s->dpi);
+                int main_top = metrics.margin + metrics.url_h + metrics.margin;
+                int right_x = metrics.margin + s->main_split + metrics.splitter;
                 if (s->drag == DRAG_MAIN) {
-                    s->main_split = x - margin;
+                    s->main_split = x - metrics.margin;
                 } else if (s->drag == DRAG_VERTICAL) {
                     s->vertical_split = y - main_top;
                 } else if (s->drag == DRAG_REQUEST) {
