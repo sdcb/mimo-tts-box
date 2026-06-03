@@ -23,6 +23,7 @@
 #define REQUEST_TIME_REFRESH_MS 60000
 #define SPLITTER_HIT_SIZE 6
 #define SPLITTER_LINE_SIZE 1
+#define STATUS_BAR_PART_COUNT 4
 
 typedef enum DragMode {
     DRAG_NONE,
@@ -56,7 +57,7 @@ typedef struct MainState {
     HWND format_combo;
     HWND optimize_check;
     HWND auto_play_check;
-    HWND status_static;
+    HWND status_bar;
     HWND preview_edit;
     HWND play_button;
     HWND stop_button;
@@ -88,6 +89,10 @@ static LRESULT CALLBACK main_child_subclass_proc(HWND hwnd, UINT msg, WPARAM wpa
 static void update_multiline_scrollbar(HWND edit);
 static void refresh_multiline_scrollbars(MainState *s);
 static void on_play(MainState *s);
+static void layout_response_status_bar(MainState *s, int x, int y, int width, int height);
+static void set_response_status_bar_text(MainState *s, const wchar_t *status_code, const wchar_t *elapsed,
+                                         const wchar_t *duration, const wchar_t *prompt_tokens,
+                                         const wchar_t *completion_tokens, const wchar_t *total_tokens);
 
 static MainState *state_from_hwnd(HWND hwnd) {
     return (MainState *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
@@ -529,26 +534,37 @@ static void set_active_from_result(MainState *s, RequestResult *result) {
     result->pcm_data = NULL;
 }
 
+static void set_response_status_bar_text(MainState *s, const wchar_t *status_code, const wchar_t *elapsed,
+                                         const wchar_t *duration, const wchar_t *prompt_tokens,
+                                         const wchar_t *completion_tokens, const wchar_t *total_tokens) {
+    wchar_t part_text[STATUS_BAR_PART_COUNT][128];
+    swprintf(part_text[0], ARRAYSIZE(part_text[0]), L"状态码: %ls", status_code ? status_code : L"--");
+    swprintf(part_text[1], ARRAYSIZE(part_text[1]), L"响应时间: %ls", elapsed ? elapsed : L"--");
+    swprintf(part_text[2], ARRAYSIZE(part_text[2]), L"音频时长: %ls", duration ? duration : L"--");
+    swprintf(part_text[3], ARRAYSIZE(part_text[3]), L"Tokens: 输入 %ls / 输出 %ls / 总计 %ls",
+             prompt_tokens ? prompt_tokens : L"--",
+             completion_tokens ? completion_tokens : L"--",
+             total_tokens ? total_tokens : L"--");
+    for (int part = 0; part < STATUS_BAR_PART_COUNT; ++part) {
+        SendMessageW(s->status_bar, SB_SETTEXT, (WPARAM)part, (LPARAM)part_text[part]);
+    }
+}
+
 static void refresh_response_view(MainState *s, BOOL success_like) {
-    wchar_t status[512];
+    wchar_t status_code[32];
     wchar_t elapsed[64];
     wchar_t duration[64];
     wchar_t prompt_tokens[32];
     wchar_t completion_tokens[32];
     wchar_t total_tokens[32];
+    swprintf(status_code, ARRAYSIZE(status_code), L"%lu", (unsigned long)s->active.status_code);
     format_milliseconds_n(s->active.elapsed_ms, elapsed, ARRAYSIZE(elapsed));
     format_optional_milliseconds_n(s->active.audio_duration_ms, duration, ARRAYSIZE(duration));
     format_optional_int_n0(s->active.prompt_tokens, prompt_tokens, ARRAYSIZE(prompt_tokens));
     format_optional_int_n0(s->active.completion_tokens, completion_tokens, ARRAYSIZE(completion_tokens));
     format_optional_int_n0(s->active.total_tokens, total_tokens, ARRAYSIZE(total_tokens));
-    swprintf(status, ARRAYSIZE(status), L"状态码: %lu    响应时间: %ls    音频时长: %ls    Tokens: 输入 %ls / 输出 %ls / 总计 %ls",
-             (unsigned long)s->active.status_code,
-             s->active.elapsed_ms > 0 ? elapsed : L"--",
-             duration,
-             prompt_tokens,
-             completion_tokens,
-             total_tokens);
-    set_control_text(s->status_static, status);
+    set_response_status_bar_text(s, status_code, s->active.elapsed_ms > 0 ? elapsed : L"--", duration,
+                                 prompt_tokens, completion_tokens, total_tokens);
     set_control_text(s->preview_edit, success_like ? s->active.preview_text : (s->active.raw_response ? s->active.raw_response : s->active.preview_text));
     SendMessageW(s->preview_edit, WM_SETFONT, (WPARAM)(success_like ? s->ui_font : s->mono_font), TRUE);
     update_multiline_scrollbar(s->preview_edit);
@@ -1050,9 +1066,28 @@ static void layout_controls(MainState *s) {
     MoveWindow(s->save_button, right_x + scale_for_dpi(192, s->dpi), resp_y, scale_for_dpi(88, s->dpi), resp_button_h, TRUE);
     MoveWindow(s->preview_edit, right_x, resp_y + resp_button_h + resp_gap, right_w,
                resp_h - resp_button_h - resp_gap - status_h - resp_gap, TRUE);
-    MoveWindow(s->status_static, right_x, resp_y + resp_h - status_h, right_w, status_h, TRUE);
+    layout_response_status_bar(s, right_x, resp_y + resp_h - status_h, right_w, status_h);
     refresh_multiline_scrollbars(s);
     InvalidateRect(s->hwnd, NULL, TRUE);
+}
+
+static void layout_response_status_bar(MainState *s, int x, int y, int width, int height) {
+    int parts[STATUS_BAR_PART_COUNT];
+    int status_w = scale_for_dpi(96, s->dpi);
+    int elapsed_w = scale_for_dpi(128, s->dpi);
+    int duration_w = scale_for_dpi(128, s->dpi);
+    if (width < status_w + elapsed_w + duration_w + scale_for_dpi(180, s->dpi)) {
+        status_w = width / STATUS_BAR_PART_COUNT;
+        elapsed_w = width / STATUS_BAR_PART_COUNT;
+        duration_w = width / STATUS_BAR_PART_COUNT;
+    }
+    parts[0] = status_w;
+    parts[1] = parts[0] + elapsed_w;
+    parts[2] = parts[1] + duration_w;
+    parts[3] = -1;
+    SendMessageW(s->status_bar, SB_SETMINHEIGHT, (WPARAM)height, 0);
+    MoveWindow(s->status_bar, x, y, width, height, TRUE);
+    SendMessageW(s->status_bar, SB_SETPARTS, (WPARAM)STATUS_BAR_PART_COUNT, (LPARAM)parts);
 }
 
 static BOOL hit_rect_point(RECT rc, int x, int y) {
@@ -1159,7 +1194,7 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
     s->format_combo = make_child(s, L"COMBOBOX", L"", CBS_DROPDOWNLIST, 0, IDC_FORMAT_COMBO);
     s->optimize_check = make_child(s, L"BUTTON", L"optimize_text_preview", BS_AUTOCHECKBOX, 0, IDC_OPTIMIZE_CHECK);
     s->auto_play_check = make_child(s, L"BUTTON", L"下载后播放", BS_AUTOCHECKBOX, 0, IDC_AUTO_PLAY_CHECK);
-    s->status_static = make_child(s, L"STATIC", L"状态码: --    响应时间: --    音频时长: --    Tokens: --", 0, 0, IDC_STATUS_STATIC);
+    s->status_bar = make_child(s, STATUSCLASSNAMEW, L"", CCS_NOPARENTALIGN | CCS_NORESIZE | SBARS_TOOLTIPS, 0, IDC_STATUS_BAR);
     s->preview_edit = make_child(s, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, WS_EX_CLIENTEDGE, IDC_PREVIEW_EDIT);
     s->play_button = make_child(s, L"BUTTON", L"\x25b6\xfe0f 播放", BS_PUSHBUTTON, 0, IDC_PLAY_BUTTON);
     s->stop_button = make_child(s, L"BUTTON", L"\x23f9\xfe0f 停止", BS_PUSHBUTTON, 0, IDC_STOP_BUTTON);
@@ -1175,6 +1210,7 @@ static BOOL on_create(HWND hwnd, CREATESTRUCTW *cs) {
         free(audio_error);
     }
     layout_controls(s);
+    set_response_status_bar_text(s, L"--", L"--", L"--", L"--", L"--", L"--");
     SetTimer(hwnd, REQUEST_TIME_TIMER_ID, REQUEST_TIME_REFRESH_MS, NULL);
     return TRUE;
 }
@@ -1220,7 +1256,7 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case WM_CTLCOLORBTN: {
         HWND child = (HWND)lparam;
         if (s && (child == s->style_label || child == s->text_label ||
-                  child == s->status_static || child == s->optimize_check || child == s->auto_play_check)) {
+                                    child == s->optimize_check || child == s->auto_play_check)) {
             return paint_label_on_window_background(wparam);
         }
         break;
