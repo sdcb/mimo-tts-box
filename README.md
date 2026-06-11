@@ -1,4 +1,4 @@
-# Mimo TTS Box
+# Mimo TTS Box [![QQ](https://img.shields.io/badge/QQ_Group-495782587-52B6EF?style=social&logo=tencent-qq&logoColor=000&logoWidth=20)](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=mma4msRKd372Z6dWpmBp4JZ9RL4Jrf8X&authKey=gccTx0h0RaH5b8B8jtuPJocU7MgFRUznqbV%2FLgsKdsK8RqZE%2BOhnETQ7nYVTp1W0&noverify=0&group_code=495782587)
 
 Mimo TTS Box 是一个使用纯 C 语言和 Win32 API 编写的小米 Mimo TTS API 桌面小工具。它可以配置 API 地址和 API Key，发送文本转语音请求，并支持播放、停止和保存返回的音频。
 
